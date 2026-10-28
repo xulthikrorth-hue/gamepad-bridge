@@ -9,8 +9,36 @@ import kotlin.system.exitProcess
 
 private const val NAME_XBOX = "Xbox Wireless Controller"
 private const val NAME_DS4 = "Wireless Controller"
-private val KEYS_XBOX = setOf(304, 305, 307, 308, 310, 311, 314, 315, 316, 317, 318)
-private val KEYS_DS4 = KEYS_XBOX + setOf(312, 313) // DS4 also reports L2/R2 as buttons
+
+// Button maps: real controller (Android/Xbox-style evdev codes) -> code the virtual pad sends.
+// Taken from Android's own key layout files (frameworks/base/data/keyboards).
+
+// Vendor_045e_Product_02fd.kl (Xbox One S, Bluetooth). The View/Back button must be KEY_BACK (158),
+// not BTN_SELECT (314), otherwise Android ignores it.
+private val XBOX_MAP = mapOf(
+    304 to 304, 305 to 305, 307 to 307, 308 to 308, 310 to 310, 311 to 311,
+    314 to 158, 315 to 315, 316 to 316, 317 to 317, 318 to 318
+)
+
+// Vendor_054c_Product_09cc.kl (DualShock 4). Completely different numbering from Xbox:
+// 304 Square, 305 Cross, 306 Circle, 307 Triangle, 308 L1, 309 R1, 310 L2, 311 R2,
+// 312 Share, 313 Options, 314 L3, 315 R3, 316 PS.
+private val DS4_MAP = mapOf(
+    304 to 305, // A  -> Cross
+    305 to 306, // B  -> Circle
+    307 to 304, // X  -> Square
+    308 to 307, // Y  -> Triangle
+    310 to 308, // L1
+    311 to 309, // R1
+    312 to 310, // L2 (button)
+    313 to 311, // R2 (button)
+    314 to 312, // Select/View -> Share
+    315 to 313, // Start/Menu  -> Options
+    316 to 316, // Home        -> PS
+    317 to 314, // L3
+    318 to 315  // R3
+)
+
 private val ABS = mapOf(
     "ABS_X" to 0, "ABS_Y" to 1, "ABS_Z" to 2, "ABS_RX" to 3, "ABS_RY" to 4, "ABS_RZ" to 5,
     "ABS_GAS" to 9, "ABS_BRAKE" to 10, "ABS_HAT0X" to 16, "ABS_HAT0Y" to 17
@@ -22,6 +50,8 @@ class UserService() : IUserService.Stub() {
     @Volatile private var proc: Process? = null
     @Volatile private var input: FileInputStream? = null
     @Volatile private var log = ""
+    @Volatile private var frames = 0L
+    @Volatile private var note = ""
     private val lock = Any()
 
     override fun destroy() {
@@ -36,7 +66,7 @@ class UserService() : IUserService.Stub() {
             val path = Regex("/dev/input/event\\d+").find(block)?.value ?: continue
             val name = Regex("name:\\s+\"(.*)\"").find(block)?.groupValues?.get(1) ?: path
             val gamepad = (block.contains("BTN_GAMEPAD") || block.contains("BTN_SOUTH")) && block.contains("ABS_X")
-            // hide our own virtual pads (real Xbox/DS4 pads work natively and need no spoofing)
+            // hide our own virtual pads (real Xbox/DS4 pads work natively and need no bridging)
             if (gamepad && name != NAME_XBOX && name != NAME_DS4) sb.append(path).append('|').append(name).append('\n')
         }
         return sb.toString()
@@ -50,6 +80,8 @@ class UserService() : IUserService.Stub() {
             val p = ProcessBuilder("/system/bin/uinput", "-").redirectErrorStream(true).start()
             proc = p
             log = ""
+            frames = 0
+            note = ""
             Thread {
                 try {
                     val b = ByteArray(1024)
@@ -69,10 +101,7 @@ class UserService() : IUserService.Stub() {
                 Thread { forward(devPath, p, ranges, ds4) }.apply { isDaemon = true }.start()
             }
             Thread.sleep(800)
-            val what = if (ds4) "DS4" else "Xbox"
-            val head = if (devPath.isEmpty()) "Virtual $what pad running (idle, nothing forwarded)."
-                       else "Virtual $what pad running, forwarding $devPath."
-            if (log.isBlank()) head else "$head\nuinput said: $log"
+            if (log.isBlank()) "ok" else "ok\nuinput said: $log"
         } catch (e: Exception) {
             "error: ${e.message}"
         }
@@ -81,6 +110,8 @@ class UserService() : IUserService.Stub() {
     override fun stop() = stopInternal()
 
     override fun status(): String = log
+
+    override fun stats(): String = "${if (proc?.isAlive == true) 1 else 0}|$frames|$note"
 
     // ---------------------------------------------------------------
 
@@ -141,7 +172,7 @@ class UserService() : IUserService.Stub() {
                 ab(9, 0, 1023, 0, 0), ab(10, 0, 1023, 0, 0), ab(16, -1, 1, 0, 0), ab(17, -1, 1, 0, 0)
             )
         }
-        val keys = (if (ds4) KEYS_DS4 else KEYS_XBOX).sorted().joinToString(",")
+        val keys = (if (ds4) DS4_MAP else XBOX_MAP).values.toSortedSet().joinToString(",")
         return """{"id":1,"command":"register","name":"$name","vid":$vid,"pid":$pid,"bus":"bluetooth",""" +
             """"configuration":[{"type":100,"data":[1,3]},{"type":101,"data":[$keys]},""" +
             """{"type":103,"data":[${axes.joinToString(",")}]}],""" +
@@ -170,7 +201,7 @@ class UserService() : IUserService.Stub() {
         // struct input_event: timeval (16 bytes on 64-bit, 8 on 32-bit) + u16 type + u16 code + s32 value
         val size = if (android.os.Process.is64Bit()) 24 else 16
         val off = size - 8
-        val keys = if (ds4) KEYS_DS4 else KEYS_XBOX
+        val keyMap = if (ds4) DS4_MAP else XBOX_MAP
 
         // Logical channels: 0 LX, 1 LY, 2 RX, 3 RY, 4 LT, 5 RT, 6 HatX, 7 HatY.
         // Real pads come in two common layouts: "xpad" (RX/RY = right stick, Z/RZ = triggers)
@@ -199,8 +230,10 @@ class UserService() : IUserService.Stub() {
                     val code = bb.getShort(off + 2).toInt() and 0xFFFF
                     val value = bb.getInt(off + 4)
                     when {
-                        type == 1 && code in keys && (value == 0 || value == 1) ->
-                            frame.append(",1,$code,$value")
+                        type == 1 && (value == 0 || value == 1) -> {
+                            val vk = keyMap[code]
+                            if (vk != null) frame.append(",1,$vk,$value")
+                        }
                         type == 3 -> {
                             val l = realToLogical[code]
                             if (l != null) {
@@ -211,11 +244,13 @@ class UserService() : IUserService.Stub() {
                         type == 0 && code == 0 && frame.isNotEmpty() -> {
                             send(p.outputStream, """{"id":1,"command":"inject","events":[${frame.substring(1)},0,0,0]}""")
                             frame.setLength(0)
+                            frames++
                         }
                     }
                 }
             }
         } catch (_: Exception) {
+            if (proc === p) note = "Controller disconnected. Reconnect it, then tap Start the bridging again."
         }
     }
 }

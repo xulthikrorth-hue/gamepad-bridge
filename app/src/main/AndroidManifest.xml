@@ -5,7 +5,9 @@
 
     <application
         android:allowBackup="false"
-        android:label="Xbox Spoof"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="Gamepad Bridge"
         android:theme="@android:style/Theme.DeviceDefault">
 
         <activity

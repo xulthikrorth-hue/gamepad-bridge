@@ -1,4 +1,4 @@
-# Virtual Gamepad (Shizuku)
+# Gamepad Bridge
 
 An Android app that creates a virtual **Xbox One** or **DualShock 4** gamepad using [Shizuku](https://shizuku.rikka.app/) and Android's built-in `uinput` tool. It can optionally forward a real controller's input to the virtual one. No root needed.
 
