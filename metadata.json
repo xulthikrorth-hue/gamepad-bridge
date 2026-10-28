@@ -1,0 +1,6 @@
+{
+  "name": "Gamepad Bridge",
+  "description": "Virtual Xbox One and DualShock 4 gamepad bridge that maps and forwards physical controller inputs using uinput and evdev emulation.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

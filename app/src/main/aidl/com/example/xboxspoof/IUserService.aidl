@@ -9,4 +9,6 @@ interface IUserService {
     String status() = 4;
     // "running(0/1)|frames forwarded|note"
     String stats() = 5;
+    // hideOriginal: uses EVIOCGRAB ioctl to isolate and hide real controller from Android EventHub/games
+    String startWithOptions(String devPath, int mode, boolean hideOriginal, boolean forwardEvents) = 6;
 }

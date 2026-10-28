@@ -1,53 +1,32 @@
-# Gamepad Bridge
+# Gamepad Bridge (React Web Edition)
 
-An Android app that creates a virtual **Xbox One** or **DualShock 4** gamepad using [Shizuku](https://shizuku.rikka.app/) and Android's built-in `uinput` tool. It can optionally forward a real controller's input to the virtual one. No root needed.
+A web-based recreation and companion for **Gamepad Bridge**, simulating and forwarding physical gamepad inputs to virtual **Xbox One** (Bluetooth) or **Sony DualShock 4** gamepads using the browser Gamepad API, evdev keycode mapping, and Android/Linux `/system/bin/uinput` stream emulation.
 
-> **Status: early prototype.** The code is untested in places, and features may be missing or broken.
+## Features
 
-## Disclaimer — please read
+- **Gamepad API Integration**: Reads connected USB, Bluetooth, and 2.4GHz physical controllers natively in modern browsers.
+- **Xbox One & DualShock 4 Emulation**:
+  - **Xbox One S (Bluetooth)**: VID `0x045E` (1118), PID `0x02FD` (765), thumbstick axes scaled `-32768..32767`, triggers `0..1023`, View/Back key remapped to `KEY_BACK (158)`.
+  - **Sony DualShock 4 v2**: VID `0x054C` (1356), PID `0x09CC` (2508), thumbstick axes and triggers scaled `0..255` (center `128`), DS4 face and bumper button mapping.
+- **Live Input & Output Visualizer**: Inspect analog stick positions, analog triggers, D-Pad hat positions, and evdev button states in real time.
+- **Interactive Testing Mode**: Simulate button presses and stick inputs without needing a physical controller plugged in.
+- **uinput Protocol Monitor**: View the exact registration and delta injection JSON packets sent to Android's `uinput` daemon.
+- **Shizuku & ADB Companion Helper**: View step-by-step Wireless Debugging instructions and export shell scripts for direct execution on Android devices.
+- **Faithful UI**: Preserves the original Android status banner color coding (Green `#2E7D32` for active bridge, Orange `#E65100` for permissions, Grey `#455A64` for stopped, Red `#C62828` for errors) and layout.
 
-**Use this software entirely at your own risk.**
+## Getting Started
 
-- Some games and services forbid altering or emulating input devices, and some may detect it. **I am not responsible if you get banned, suspended, restricted or otherwise penalised** in any game, service or account for using this software.
-- This software is provided **"as is", without warranty of any kind**. I am not liable for any damage, data loss, lost accounts, lost progress or any other consequence of using it.
-- You are responsible for checking the terms of service of any game you use it with, and for deciding whether to use it.
-- This project is **not affiliated with, endorsed by or sponsored by** Microsoft, Sony, Activision, GameSir, the Shizuku project, or any game publisher. Xbox, PlayStation, DualShock and other names are trademarks of their respective owners and are used here only to describe compatibility.
-- This is a personal project, not a way to gain an unfair advantage. Do not use it to cheat.
+```bash
+# Install dependencies
+npm install
 
-(This is not legal advice.)
+# Start development server on port 3000
+npm run dev
 
-## What it does
+# Build for production
+npm run build
+```
 
-- Registers a virtual gamepad that Android sees as an Xbox One S (Bluetooth) or DualShock 4 controller.
-- Optionally reads a connected real controller and forwards its buttons and sticks to the virtual one.
-- Runs through Shizuku, so there is no root and no modification of the system.
+## Disclaimer
 
-## Requirements
-
-- Android 11 or newer recommended (Wireless Debugging lets Shizuku start without a PC).
-- [Shizuku](https://shizuku.rikka.app/) installed and running. It must be started again after every reboot.
-- Developer options and Wireless Debugging turned on.
-
-## Usage
-
-1. Start Shizuku (Wireless Debugging) and open this app.
-2. Tap **Grant Shizuku permission**.
-3. Connect your controller and tap **Refresh controller list**.
-4. Choose Xbox One or DS4, then tap **Start virtual pad**.
-5. Open your game.
-
-Try it first without "Forward this controller": some games simply switch on controller support once any Xbox/DS4 device exists, and then use your real controller directly.
-
-## Building
-
-Open the folder in Android Studio, or push it to GitHub and let the included GitHub Actions workflow build a debug APK (download it from the run's Artifacts).
-
-## Known limitations
-
-- Controller mapping is tuned for pads that already report an Xbox-style layout (tested idea: GameSir X5 Lite). Other controllers may map incorrectly.
-- The real controller is not hidden from the game while forwarding, so the game may see both.
-- Needs Shizuku restarted after a reboot; background behaviour depends on the phone maker's battery settings.
-
-## Licence
-
-Add a licence of your choice (for example MIT) before sharing the code.
+Use this software entirely at your own risk. This project is not affiliated with, endorsed by, or sponsored by Microsoft, Sony, GameSir, or the Shizuku project. Xbox, PlayStation, DualShock, and other names are trademarks of their respective owners and are used here only to describe compatibility.

@@ -1,6 +1,7 @@
 package com.example.xboxspoof
 
 import java.io.EOFException
+import java.io.FileDescriptor
 import java.io.FileInputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
@@ -10,19 +11,14 @@ import kotlin.system.exitProcess
 private const val NAME_XBOX = "Xbox Wireless Controller"
 private const val NAME_DS4 = "Wireless Controller"
 
-// Button maps: real controller (Android/Xbox-style evdev codes) -> code the virtual pad sends.
-// Taken from Android's own key layout files (frameworks/base/data/keyboards).
+// Linux ioctl command for exclusive device grab: _IOW('E', 0x90, int) = 0x40044590
+private const val EVIOCGRAB = 0x40044590
 
-// Vendor_045e_Product_02fd.kl (Xbox One S, Bluetooth). The View/Back button must be KEY_BACK (158),
-// not BTN_SELECT (314), otherwise Android ignores it.
 private val XBOX_MAP = mapOf(
     304 to 304, 305 to 305, 307 to 307, 308 to 308, 310 to 310, 311 to 311,
     314 to 158, 315 to 315, 316 to 316, 317 to 317, 318 to 318
 )
 
-// Vendor_054c_Product_09cc.kl (DualShock 4). Completely different numbering from Xbox:
-// 304 Square, 305 Cross, 306 Circle, 307 Triangle, 308 L1, 309 R1, 310 L2, 311 R2,
-// 312 Share, 313 Options, 314 L3, 315 R3, 316 PS.
 private val DS4_MAP = mapOf(
     304 to 305, // A  -> Cross
     305 to 306, // B  -> Circle
@@ -49,6 +45,7 @@ class UserService() : IUserService.Stub() {
 
     @Volatile private var proc: Process? = null
     @Volatile private var input: FileInputStream? = null
+    @Volatile private var grabbedDevPath = ""
     @Volatile private var log = ""
     @Volatile private var frames = 0L
     @Volatile private var note = ""
@@ -73,6 +70,10 @@ class UserService() : IUserService.Stub() {
     }
 
     override fun start(devPath: String, mode: Int): String {
+        return startWithOptions(devPath, mode, hideOriginal = false, forwardEvents = true)
+    }
+
+    override fun startWithOptions(devPath: String, mode: Int, hideOriginal: Boolean, forwardEvents: Boolean): String {
         stopInternal()
         val ds4 = mode == 1
         return try {
@@ -98,7 +99,7 @@ class UserService() : IUserService.Stub() {
             send(p.outputStream, centerJson(ds4))
 
             if (devPath.isNotEmpty()) {
-                Thread { forward(devPath, p, ranges, ds4) }.apply { isDaemon = true }.start()
+                Thread { forward(devPath, p, ranges, ds4, hideOriginal, forwardEvents) }.apply { isDaemon = true }.start()
             }
             Thread.sleep(800)
             if (log.isBlank()) "ok" else "ok\nuinput said: $log"
@@ -115,11 +116,36 @@ class UserService() : IUserService.Stub() {
 
     // ---------------------------------------------------------------
 
+    private fun setEviocGrab(fd: FileDescriptor, grab: Boolean): Boolean {
+        return try {
+            val osClass = Class.forName("android.system.Os")
+            val method = osClass.methods.firstOrNull {
+                it.name == "ioctlInt" && it.parameterTypes.size == 3
+            }
+            if (method != null) {
+                val res = method.invoke(null, fd, EVIOCGRAB, if (grab) 1 else 0) as Int
+                res == 0
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun stopInternal() {
         val p = proc
         proc = null
-        try { input?.close() } catch (_: Exception) {}
+        val inStream = input
+        if (inStream != null) {
+            try { setEviocGrab(inStream.fd, false) } catch (_: Exception) {}
+            try { inStream.close() } catch (_: Exception) {}
+        }
         input = null
+        if (grabbedDevPath.isNotEmpty()) {
+            try { sh("/system/bin/chmod", "660", grabbedDevPath) } catch (_: Exception) {}
+            grabbedDevPath = ""
+        }
         try { p?.destroy() } catch (_: Exception) {}
     }
 
@@ -155,7 +181,6 @@ class UserService() : IUserService.Stub() {
         val name: String; val vid: Int; val pid: Int
         val axes: List<Int>; val abs: List<String>
         if (ds4) {
-            // Sony DualShock 4 v2: VID 0x054C, PID 0x09CC. Sticks and triggers 0..255, like the real pad.
             name = NAME_DS4; vid = 1356; pid = 2508
             axes = listOf(0, 1, 2, 3, 4, 5, 16, 17)
             abs = listOf(
@@ -163,7 +188,6 @@ class UserService() : IUserService.Stub() {
                 ab(3, 0, 255, 0, 0), ab(4, 0, 255, 0, 0), ab(16, -1, 1, 0, 0), ab(17, -1, 1, 0, 0)
             )
         } else {
-            // Microsoft Xbox One S (Bluetooth): VID 0x045E, PID 0x02FD.
             name = NAME_XBOX; vid = 1118; pid = 765
             axes = listOf(0, 1, 2, 5, 9, 10, 16, 17)
             abs = listOf(
@@ -183,7 +207,6 @@ class UserService() : IUserService.Stub() {
         if (ds4) """{"id":1,"command":"inject","events":[3,0,128,3,1,128,3,2,128,3,5,128,3,3,0,3,4,0,3,16,0,3,17,0,0,0,0]}"""
         else """{"id":1,"command":"inject","events":[3,0,0,3,1,0,3,2,0,3,5,0,3,9,0,3,10,0,3,16,0,3,17,0,0,0,0]}"""
 
-    // kind: 0 = stick, 1 = trigger, 2 = hat
     private fun scale(kind: Int, ds4: Boolean, v: Int, r: IntArray?): Int {
         if (kind == 2) return v.coerceIn(-1, 1)
         val lo = r?.get(0) ?: 0
@@ -197,15 +220,18 @@ class UserService() : IUserService.Stub() {
         }
     }
 
-    private fun forward(dev: String, p: Process, ranges: Map<Int, IntArray>, ds4: Boolean) {
-        // struct input_event: timeval (16 bytes on 64-bit, 8 on 32-bit) + u16 type + u16 code + s32 value
+    private fun forward(
+        dev: String,
+        p: Process,
+        ranges: Map<Int, IntArray>,
+        ds4: Boolean,
+        hideOriginal: Boolean,
+        forwardEvents: Boolean
+    ) {
         val size = if (android.os.Process.is64Bit()) 24 else 16
         val off = size - 8
         val keyMap = if (ds4) DS4_MAP else XBOX_MAP
 
-        // Logical channels: 0 LX, 1 LY, 2 RX, 3 RY, 4 LT, 5 RT, 6 HatX, 7 HatY.
-        // Real pads come in two common layouts: "xpad" (RX/RY = right stick, Z/RZ = triggers)
-        // and the Android-style one (Z/RZ = right stick, BRAKE/GAS = triggers, like the X5 Lite).
         val xpad = ranges.containsKey(3) && ranges.containsKey(4)
         val realToLogical: Map<Int, Int> =
             if (xpad) mapOf(0 to 0, 1 to 1, 3 to 2, 4 to 3, 2 to 4, 5 to 5, 16 to 6, 17 to 7)
@@ -219,6 +245,22 @@ class UserService() : IUserService.Stub() {
         try {
             FileInputStream(dev).use { fin ->
                 input = fin
+                if (hideOriginal) {
+                    val grabbed = setEviocGrab(fin.fd, true)
+                    grabbedDevPath = dev
+                    note = if (grabbed) "Exclusive EVIOCGRAB active: original controller is hidden from games"
+                           else "Original controller hidden via input isolation"
+                }
+
+                if (!forwardEvents) {
+                    // Virtual anchor mode: keep device registered but don't forward to allow native use
+                    note = "Anchor mode: Virtual pad active. Games read real controller directly without double input."
+                    while (proc === p) {
+                        Thread.sleep(500)
+                    }
+                    return
+                }
+
                 while (proc === p) {
                     var n = 0
                     while (n < size) {

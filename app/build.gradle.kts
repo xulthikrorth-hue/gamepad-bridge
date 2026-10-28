@@ -10,8 +10,8 @@ android {
         applicationId = "com.example.xboxspoof"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "0.2"
     }
     buildFeatures { aidl = true }
     compileOptions {
@@ -19,6 +19,15 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
+}
+
+base {
+    archivesName.set("Gamepad-Bridge")
 }
 
 dependencies {

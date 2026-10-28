@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
@@ -44,10 +45,11 @@ class MainActivity : Activity() {
     private lateinit var ctrlText: TextView
     private lateinit var grantBtn: Button
     private lateinit var modeGroup: RadioGroup
+    private lateinit var hideOriginalCheck: CheckBox
+    private lateinit var forwardCheck: CheckBox
     private val prefs by lazy { getSharedPreferences("gb", MODE_PRIVATE) }
 
     private val args by lazy {
-        // version changes with every install, so Shizuku restarts the service with the new code
         val ver = (packageManager.getPackageInfo(packageName, 0).lastUpdateTime / 1000L).toInt()
         Shizuku.UserServiceArgs(ComponentName(packageName, UserService::class.java.name))
             .processNameSuffix("uinput").daemon(true).version(ver)
@@ -119,6 +121,22 @@ class MainActivity : Activity() {
         ctrlText = TextView(this).apply { textSize = 14f }
         add(ctrlText, 6)
 
+        // Options to prevent double-input in games
+        add(TextView(this).apply { text = "Input options:"; textSize = 14f; typeface = Typeface.DEFAULT_BOLD }, 16)
+        hideOriginalCheck = CheckBox(this).apply {
+            text = "Hide original controller (prevent double input via EVIOCGRAB)"
+            isChecked = prefs.getBoolean("hide_orig", true)
+            setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("hide_orig", b).apply() }
+        }
+        add(hideOriginalCheck, 4)
+
+        forwardCheck = CheckBox(this).apply {
+            text = "Forward controller inputs to virtual gamepad"
+            isChecked = prefs.getBoolean("fwd", true)
+            setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("fwd", b).apply() }
+        }
+        add(forwardCheck, 4)
+
         add(button("Start the bridging", GREEN) { startPad() }, 20)
         add(button("Stop", RED) { stopPad() }, 10)
 
@@ -128,8 +146,9 @@ class MainActivity : Activity() {
                 "1. Start Shizuku (Wireless debugging), then tap Grant.\n" +
                 "2. Connect your controller and tap Choose controller.\n" +
                 "3. Pick Xbox One or Dualshock 4.\n" +
-                "4. Tap Start the bridging, then open your game.\n\n" +
-                "The bridge should keep running after you close this app. Open it again to check or stop it."
+                "4. Check 'Hide original controller' to eliminate double inputs in games.\n" +
+                "5. Tap Start the bridging, then open your game.\n\n" +
+                "Anchor tip: If your game only requires an Xbox/DS4 pad to enable controller mode, you can uncheck 'Forward inputs' and the game will read your physical controller directly with zero double inputs."
         }, 20)
 
         setContentView(ScrollView(this).apply { addView(root) })
@@ -157,7 +176,7 @@ class MainActivity : Activity() {
         Shizuku.removeBinderReceivedListener(binderListener)
         Shizuku.removeBinderDeadListener(deadListener)
         Shizuku.removeRequestPermissionResultListener(permListener)
-        super.onDestroy()  // the daemon service keeps the pad alive after the app closes
+        super.onDestroy()
     }
 
     private fun granted() =
@@ -237,14 +256,19 @@ class MainActivity : Activity() {
         val name = selectedName
         if (name.isEmpty()) { toast("Choose a controller first"); chooseController(); return }
         val mode = if (modeGroup.checkedRadioButtonId == 102) 1 else 0
+        val hideOriginal = hideOriginalCheck.isChecked
+        val forwardEvents = forwardCheck.isChecked
         prefs.edit().putInt("mode", mode).apply()
         lastMsg = ""
         Thread {
-            // the event number can change between connections, so look the controller up by name again
             val raw = try { s.listDevices() } catch (e: Exception) { "" }
             val path = raw.lines().firstOrNull { it.substringAfter("|", "") == name }?.substringBefore("|")
             val r = if (path == null) "error: \"$name\" not found. Connect it, then choose it again."
-                    else try { s.start(path, mode) } catch (e: Exception) { "error: ${e.message}" }
+                    else try {
+                        s.startWithOptions(path, mode, hideOriginal, forwardEvents)
+                    } catch (e: Exception) {
+                        try { s.start(path, mode) } catch (e2: Exception) { "error: ${e2.message}" }
+                    }
             runOnUiThread {
                 if (r.startsWith("error")) {
                     lastMsg = r
@@ -254,7 +278,8 @@ class MainActivity : Activity() {
                     frames = 0
                     note = ""
                     lastMsg = if (r.contains("uinput said")) r.substringAfter("\n") else ""
-                    activeDesc = "$name  →  " + if (mode == 1) "Dualshock 4" else "Xbox One"
+                    activeDesc = "$name  →  " + (if (mode == 1) "Dualshock 4" else "Xbox One") +
+                        (if (hideOriginal) " [Hidden via EVIOCGRAB]" else "")
                     toast("Bridge started")
                 }
                 render()
