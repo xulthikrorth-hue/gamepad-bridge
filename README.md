@@ -30,3 +30,5 @@ npm run build
 ## Disclaimer
 
 Use this software entirely at your own risk. This project is not affiliated with, endorsed by, or sponsored by Microsoft, Sony, GameSir, or the Shizuku project. Xbox, PlayStation, DualShock, and other names are trademarks of their respective owners and are used here only to describe compatibility.
+
+This app was made using generative AI (Claude, Google AI Studio)
