@@ -29,7 +29,6 @@ import {
   Info,
   Download,
   Shield,
-  Lock,
 } from 'lucide-react';
 
 
@@ -42,8 +41,7 @@ export const App: React.FC = () => {
   // Selected target mode: 0 = Xbox One, 1 = Dualshock 4
   const [mode, setMode] = useState<TargetMode>('xbox');
 
-  // Input options to prevent double-input in games
-  const [hideOriginal, setHideOriginal] = useState<boolean>(true);
+  // Forward inputs (true) or anchor mode: virtual pad only (false)
   const [forwardEvents, setForwardEvents] = useState<boolean>(true);
 
   // Controller list & selection
@@ -146,7 +144,7 @@ export const App: React.FC = () => {
       showToast('Not connected to Shizuku yet');
       return;
     }
-    if (!selectedDevice) {
+    if (forwardEvents && !selectedDevice) {
       showToast('Choose a controller first');
       setIsChooseModalOpen(true);
       return;
@@ -170,24 +168,11 @@ export const App: React.FC = () => {
 
     setBridgeRunning(true);
     setActiveDesc(
-      `${selectedDevice.name}  →  ${isDs4 ? 'Dualshock 4' : 'Xbox One'}` +
-        (hideOriginal ? ' [Hidden via EVIOCGRAB]' : '') +
-        (!forwardEvents ? ' [Anchor Mode]' : '')
+      forwardEvents && selectedDevice
+        ? `${selectedDevice.name}  →  ${isDs4 ? 'Dualshock 4' : 'Xbox One'}`
+        : `Virtual ${isDs4 ? 'Dualshock 4' : 'Xbox One'} pad only (anchor mode)`
     );
-    if (hideOriginal) {
-      setUinputLogs((prev) => [
-        createUInputLogEntry(
-          'system',
-          `EVIOCGRAB (0x40044590) lock acquired on ${selectedDevice.path}. Original controller is hidden from Android games.`
-        ),
-        ...prev,
-      ]);
-    }
-    showToast(
-      hideOriginal
-        ? 'Bridge started (original controller hidden)'
-        : 'Bridge started'
-    );
+    showToast('Bridge started');
   };
 
   // Stop the bridging
@@ -198,7 +183,7 @@ export const App: React.FC = () => {
     setUinputLogs((prev) => [
       createUInputLogEntry(
         'system',
-        'Virtual uinput device destroyed & released. EVIOCGRAB lock released.'
+        'Virtual uinput device destroyed & released.'
       ),
       ...prev.slice(0, 50),
     ]);
@@ -513,36 +498,10 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Input Options (Double Input Prevention) */}
+          {/* Input option */}
           <div className="space-y-2 pt-1">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-bold text-stone-200">
-                Input Options (Prevent Double Input):
-              </label>
-              <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
-                EVIOCGRAB Supported
-              </span>
-            </div>
             <div className="space-y-2.5 bg-stone-950/50 p-3 rounded-xl border border-stone-800 text-xs">
               <label className="flex items-start gap-2.5 cursor-pointer text-stone-200">
-                <input
-                  type="checkbox"
-                  checked={hideOriginal}
-                  onChange={(e) => setHideOriginal(e.target.checked)}
-                  className="mt-0.5 rounded border-stone-700 bg-stone-900 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                />
-                <div className="flex-1">
-                  <div className="font-semibold text-stone-100 flex items-center gap-1.5">
-                    <Lock className="w-3.5 h-3.5 text-emerald-400" />
-                    Hide original controller (exclusive EVIOCGRAB lock)
-                  </div>
-                  <div className="text-[11px] text-stone-400 leading-normal mt-0.5">
-                    Grabs the real controller node so Android's EventHub and games only see the virtual pad. Completely prevents duplicate button presses and double joystick inputs.
-                  </div>
-                </div>
-              </label>
-
-              <label className="flex items-start gap-2.5 cursor-pointer text-stone-200 pt-2 border-t border-stone-800/80">
                 <input
                   type="checkbox"
                   checked={forwardEvents}
@@ -552,10 +511,10 @@ export const App: React.FC = () => {
                 <div className="flex-1">
                   <div className="font-semibold text-stone-100 flex items-center gap-1.5">
                     <Activity className="w-3.5 h-3.5 text-cyan-400" />
-                    Forward controller inputs to virtual gamepad
+                    Forward controller inputs to the virtual pad
                   </div>
                   <div className="text-[11px] text-stone-400 leading-normal mt-0.5">
-                    When unchecked (&quot;Anchor Mode&quot;), the app maintains the virtual Xbox/DS4 device in the background so games like COD Mobile enable gamepad mode, while letting your real controller respond directly without forwarding.
+                    Turn this off (&quot;anchor mode&quot;) if your game already works with your own controller once the virtual pad exists, for example COD Mobile. Nothing is forwarded, so there is no added delay.
                   </div>
                 </div>
               </label>

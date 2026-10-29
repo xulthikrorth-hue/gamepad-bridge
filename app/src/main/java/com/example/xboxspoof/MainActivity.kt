@@ -36,6 +36,7 @@ class MainActivity : Activity() {
 
     private var selectedName = ""
     private var bridgeRunning = false
+    private var anchorMode = false
     private var frames = 0L
     private var note = ""
     private var lastMsg = ""
@@ -43,13 +44,14 @@ class MainActivity : Activity() {
 
     private lateinit var banner: TextView
     private lateinit var ctrlText: TextView
+    private lateinit var pickBtn: Button
     private lateinit var grantBtn: Button
     private lateinit var modeGroup: RadioGroup
-    private lateinit var hideOriginalCheck: CheckBox
     private lateinit var forwardCheck: CheckBox
     private val prefs by lazy { getSharedPreferences("gb", MODE_PRIVATE) }
 
     private val args by lazy {
+        // version changes with every install, so Shizuku restarts the service with the new code
         val ver = (packageManager.getPackageInfo(packageName, 0).lastUpdateTime / 1000L).toInt()
         Shizuku.UserServiceArgs(ComponentName(packageName, UserService::class.java.name))
             .processNameSuffix("uinput").daemon(true).version(ver)
@@ -117,25 +119,22 @@ class MainActivity : Activity() {
         }
         add(modeGroup, 4)
 
-        add(button("Choose controller", null) { chooseController() }, 16)
+        forwardCheck = CheckBox(this).apply {
+            text = "Forward controller inputs to the virtual pad"
+            isChecked = prefs.getBoolean("fwd", true)
+            setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("fwd", b).apply(); render() }
+        }
+        add(forwardCheck, 16)
+        add(TextView(this).apply {
+            textSize = 12f
+            text = "Turn this off if your game already works with your own controller once the virtual " +
+                "pad exists (for example COD Mobile). Nothing is forwarded, so there is no added delay."
+        }, 2)
+
+        pickBtn = button("Choose controller", null) { chooseController() }
+        add(pickBtn, 12)
         ctrlText = TextView(this).apply { textSize = 14f }
         add(ctrlText, 6)
-
-        // Options to prevent double-input in games
-        add(TextView(this).apply { text = "Input options:"; textSize = 14f; typeface = Typeface.DEFAULT_BOLD }, 16)
-        hideOriginalCheck = CheckBox(this).apply {
-            text = "Hide original controller (prevent double input via EVIOCGRAB)"
-            isChecked = prefs.getBoolean("hide_orig", true)
-            setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("hide_orig", b).apply() }
-        }
-        add(hideOriginalCheck, 4)
-
-        forwardCheck = CheckBox(this).apply {
-            text = "Forward controller inputs to virtual gamepad"
-            isChecked = prefs.getBoolean("fwd", true)
-            setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("fwd", b).apply() }
-        }
-        add(forwardCheck, 4)
 
         add(button("Start the bridging", GREEN) { startPad() }, 20)
         add(button("Stop", RED) { stopPad() }, 10)
@@ -144,11 +143,12 @@ class MainActivity : Activity() {
             textSize = 12f
             text = "How to use:\n" +
                 "1. Start Shizuku (Wireless debugging), then tap Grant.\n" +
-                "2. Connect your controller and tap Choose controller.\n" +
-                "3. Pick Xbox One or Dualshock 4.\n" +
-                "4. Check 'Hide original controller' to eliminate double inputs in games.\n" +
-                "5. Tap Start the bridging, then open your game.\n\n" +
-                "Anchor tip: If your game only requires an Xbox/DS4 pad to enable controller mode, you can uncheck 'Forward inputs' and the game will read your physical controller directly with zero double inputs."
+                "2. Pick Xbox One or Dualshock 4.\n" +
+                "3. Forwarding on: choose your controller. Forwarding off: just start the bridge " +
+                "and the game reads your controller itself.\n" +
+                "4. Tap Start the bridging, then open your game.\n\n" +
+                "Shizuku must be started again after every reboot. For best results set this app and " +
+                "Shizuku to Unrestricted battery use."
         }, 20)
 
         setContentView(ScrollView(this).apply { addView(root) })
@@ -176,7 +176,7 @@ class MainActivity : Activity() {
         Shizuku.removeBinderReceivedListener(binderListener)
         Shizuku.removeBinderDeadListener(deadListener)
         Shizuku.removeRequestPermissionResultListener(permListener)
-        super.onDestroy()
+        super.onDestroy()  // the daemon service keeps the pad alive after the app closes
     }
 
     private fun granted() =
@@ -207,11 +207,12 @@ class MainActivity : Activity() {
                 }
                 runOnUiThread {
                     if (txt != null) {
-                        val p = txt.split("|", limit = 3)
-                        if (p.size == 3) {
+                        val p = txt.split("|", limit = 4)
+                        if (p.size == 4) {
                             bridgeRunning = p[0] == "1"
                             frames = p[1].toLongOrNull() ?: 0L
-                            note = p[2]
+                            anchorMode = p[2] == "1"
+                            note = p[3]
                         }
                     }
                     render()
@@ -253,33 +254,33 @@ class MainActivity : Activity() {
 
     private fun startPad() {
         val s = svc ?: run { toast("Not connected to Shizuku yet"); return }
+        val forward = forwardCheck.isChecked
         val name = selectedName
-        if (name.isEmpty()) { toast("Choose a controller first"); chooseController(); return }
+        if (forward && name.isEmpty()) { toast("Choose a controller first"); chooseController(); return }
         val mode = if (modeGroup.checkedRadioButtonId == 102) 1 else 0
-        val hideOriginal = hideOriginalCheck.isChecked
-        val forwardEvents = forwardCheck.isChecked
+        val modeName = if (mode == 1) "Dualshock 4" else "Xbox One"
         prefs.edit().putInt("mode", mode).apply()
         lastMsg = ""
         Thread {
-            val raw = try { s.listDevices() } catch (e: Exception) { "" }
-            val path = raw.lines().firstOrNull { it.substringAfter("|", "") == name }?.substringBefore("|")
+            // the event number can change between connections, so look the controller up by name again
+            val path: String? = if (!forward) "" else {
+                val raw = try { s.listDevices() } catch (e: Exception) { "" }
+                raw.lines().firstOrNull { it.substringAfter("|", "") == name }?.substringBefore("|")
+            }
             val r = if (path == null) "error: \"$name\" not found. Connect it, then choose it again."
-                    else try {
-                        s.startWithOptions(path, mode, hideOriginal, forwardEvents)
-                    } catch (e: Exception) {
-                        try { s.start(path, mode) } catch (e2: Exception) { "error: ${e2.message}" }
-                    }
+                    else try { s.start(path, mode) } catch (e: Exception) { "error: ${e.message}" }
             runOnUiThread {
                 if (r.startsWith("error")) {
                     lastMsg = r
                     bridgeRunning = false
                 } else {
                     bridgeRunning = true
+                    anchorMode = !forward
                     frames = 0
                     note = ""
                     lastMsg = if (r.contains("uinput said")) r.substringAfter("\n") else ""
-                    activeDesc = "$name  →  " + (if (mode == 1) "Dualshock 4" else "Xbox One") +
-                        (if (hideOriginal) " [Hidden via EVIOCGRAB]" else "")
+                    activeDesc = if (forward) "$name  →  $modeName"
+                                 else "Virtual $modeName pad only"
                     toast("Bridge started")
                 }
                 render()
@@ -307,6 +308,9 @@ class MainActivity : Activity() {
         val shizukuUp = Shizuku.pingBinder()
         val ok = shizukuUp && granted()
         grantBtn.visibility = if (ok) View.GONE else View.VISIBLE
+        val fwd = forwardCheck.isChecked
+        pickBtn.visibility = if (fwd) View.VISIBLE else View.GONE
+        ctrlText.visibility = if (fwd) View.VISIBLE else View.GONE
         ctrlText.text = "Controller: " + if (selectedName.isEmpty()) "none chosen yet" else selectedName
 
         val bg: Int
@@ -319,7 +323,8 @@ class MainActivity : Activity() {
                 bg = GREEN
                 msg = "● BRIDGE IS RUNNING\n" +
                     (if (activeDesc.isNotEmpty()) "$activeDesc\n" else "") +
-                    "Inputs passed through: $frames" +
+                    (if (anchorMode) "Anchor mode: nothing is forwarded, the game reads your controller itself."
+                     else "Inputs passed through: $frames") +
                     (if (note.isNotEmpty()) "\n⚠ $note" else "") +
                     (if (lastMsg.isNotEmpty()) "\n$lastMsg" else "")
             }

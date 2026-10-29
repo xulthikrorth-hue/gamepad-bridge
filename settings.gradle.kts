@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Gamepad Bridge"
+rootProject.name = "GamepadBridge"
 include(":app")

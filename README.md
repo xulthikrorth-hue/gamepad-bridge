@@ -1,34 +1,70 @@
-# Gamepad Bridge (React Web Edition)
+<p align="center"><img src="public/favicon.png" width="120" alt="Gamepad Bridge icon"></p>
 
-A web-based recreation and companion for **Gamepad Bridge**, simulating and forwarding physical gamepad inputs to virtual **Xbox One** (Bluetooth) or **Sony DualShock 4** gamepads using the browser Gamepad API, evdev keycode mapping, and Android/Linux `/system/bin/uinput` stream emulation.
+# Gamepad Bridge
 
-## Features
+An Android app that creates a virtual **Xbox One** or **DualShock 4** gamepad using [Shizuku](https://shizuku.rikka.app/) and Android's built-in `uinput` tool, so games that only accept those controllers will switch on controller support. It can also forward your real controller's buttons and sticks to the virtual pad. No root needed.
 
-- **Gamepad API Integration**: Reads connected USB, Bluetooth, and 2.4GHz physical controllers natively in modern browsers.
-- **Xbox One & DualShock 4 Emulation**:
-  - **Xbox One S (Bluetooth)**: VID `0x045E` (1118), PID `0x02FD` (765), thumbstick axes scaled `-32768..32767`, triggers `0..1023`, View/Back key remapped to `KEY_BACK (158)`.
-  - **Sony DualShock 4 v2**: VID `0x054C` (1356), PID `0x09CC` (2508), thumbstick axes and triggers scaled `0..255` (center `128`), DS4 face and bumper button mapping.
-- **Live Input & Output Visualizer**: Inspect analog stick positions, analog triggers, D-Pad hat positions, and evdev button states in real time.
-- **Interactive Testing Mode**: Simulate button presses and stick inputs without needing a physical controller plugged in.
-- **uinput Protocol Monitor**: View the exact registration and delta injection JSON packets sent to Android's `uinput` daemon.
-- **Shizuku & ADB Companion Helper**: View step-by-step Wireless Debugging instructions and export shell scripts for direct execution on Android devices.
-- **Faithful UI**: Preserves the original Android status banner color coding (Green `#2E7D32` for active bridge, Orange `#E65100` for permissions, Grey `#455A64` for stopped, Red `#C62828` for errors) and layout.
+> **Status: early prototype.** Tested by the author on one phone with one controller (OnePlus Nord 4, Android 16, GameSir X5 Lite). Expect rough edges.
 
-## Getting Started
+This repository has two parts:
 
-```bash
-# Install dependencies
+| Part | Folder | What it is |
+|------|--------|------------|
+| **Android app** | `app/` | The real thing. Does the bridging. |
+| **Web companion** | `src/`, `public/` | A React page that visualises controller input and shows the `uinput` messages and a helper script. It runs in a browser, so **it cannot bridge anything on its own**. |
+
+## Disclaimer — please read
+
+**Use this software entirely at your own risk.**
+
+- Some games and services forbid emulating or altering input devices, and some may detect it. **The author is not responsible if you get banned, suspended, restricted or otherwise penalised** in any game, service or account for using this software.
+- This software is provided **"as is", without warranty of any kind**. The author is not liable for any damage, data loss, lost accounts, lost progress or any other consequence of using it.
+- You are responsible for checking the terms of service of any game you use it with, and for deciding whether to use it.
+- This project is **not affiliated with, endorsed by or sponsored by** Microsoft, Sony, Activision, GameSir, the Shizuku project, or any game publisher. Xbox, PlayStation, DualShock and other names are trademarks of their respective owners and are used only to describe compatibility.
+- This is a personal project and is not meant to give anyone an unfair advantage. Do not use it to cheat.
+
+This is not legal advice. This app was made using generative AI (Claude, Google AI Studio).
+
+## Using the Android app
+
+You need Android 11 or newer (Wireless Debugging lets Shizuku start without a computer) and [Shizuku](https://shizuku.rikka.app/).
+
+1. Turn on Developer options and **Wireless debugging**, then open Shizuku and start it. **Start Shizuku again after every reboot.**
+2. Open Gamepad Bridge and tap **Grant Shizuku permission**.
+3. Choose **Xbox One Controller** or **Dualshock 4 Controller**.
+4. Choose how it should work:
+   - **Forward controller inputs ON** — tap *Choose controller*, pick your controller from the list, and the app passes its buttons and sticks to the virtual pad.
+   - **Forward controller inputs OFF (anchor mode)** — the app only creates the virtual pad. Many games (COD Mobile, for one) only need an Xbox/DS4 device to exist and then read your own controller directly, with no added delay.
+5. Tap **Start the bridging**. A green banner shows the bridge is running (with a live counter when forwarding). Open your game.
+
+Tip: set both Shizuku and Gamepad Bridge to **Unrestricted** battery use, because some phone makers (OnePlus/OxygenOS included) stop background apps.
+
+## Building the Android app on GitHub (no Android Studio needed)
+
+1. Push this repository to GitHub.
+2. Open the **Actions** tab. The **Build APK** workflow runs on every push to `main` (or press *Run workflow*).
+3. When it shows a green tick, open the run and download **Gamepad-Bridge-APK** from *Artifacts* (it is a zip containing the APK).
+4. To keep a permanent download, create a **Release** whose tag starts with `v` (for example `v0.3`). The workflow attaches the APK to that release.
+
+Builds are debug-signed with a fresh key each time, so **uninstall the old app before installing a new build**.
+
+You can also open the folder in Android Studio and run it on your phone.
+
+## Running the web companion
+
+```
 npm install
-
-# Start development server on port 3000
-npm run dev
-
-# Build for production
+npm run dev      # http://localhost:3000
 npm run build
 ```
 
-## Disclaimer
+## Known limitations
 
-Use this software entirely at your own risk. This project is not affiliated with, endorsed by, or sponsored by Microsoft, Sony, GameSir, or the Shizuku project. Xbox, PlayStation, DualShock, and other names are trademarks of their respective owners and are used here only to describe compatibility.
+- Button and axis mapping is tuned for controllers that already report an Xbox-style layout (like the GameSir X5 Lite). Other controllers may map wrongly; a "press a button to map it" screen is not built yet.
+- When forwarding, the real controller is **not hidden** from the game. In the author's testing with COD Mobile and Alto's Odyssey this caused no double inputs, but other games may differ. Hiding it needs native code and is not implemented.
+- D-pads that are reported as buttons (instead of a hat) and controllers without analog triggers are not handled.
+- Shizuku has to be restarted after every reboot.
 
-This app was made using generative AI (Claude, Google AI Studio)
+## Licence
+
+MIT, see `LICENSE`.

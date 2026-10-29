@@ -17,7 +17,7 @@ export const AdbHelperModal: React.FC<AdbHelperModalProps> = ({
   selectedDevice,
 }) => {
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<'shizuku' | 'adb' | 'eviocgrab' | 'uinput_json'>('shizuku');
+  const [activeTab, setActiveTab] = useState<'shizuku' | 'adb' | 'anchor' | 'uinput_json'>('shizuku');
 
   if (!isOpen) return null;
 
@@ -26,23 +26,20 @@ export const AdbHelperModal: React.FC<AdbHelperModalProps> = ({
   const devPath = selectedDevice?.path || '/dev/input/event2';
 
   const adbScript = `#!/bin/sh
-# Gamepad Bridge Companion Script
+# Gamepad Bridge companion script (anchor mode)
 # Target: ${mode === 'xbox' ? 'Xbox One S (Bluetooth)' : 'Sony DualShock 4 v2'}
-# Source Controller: ${selectedDevice?.name || 'Any Gamepad'} (${devPath})
+#
+# Creates the virtual pad only. Games that need an Xbox/DS4 device to unlock
+# controller support will then read your real controller directly.
+# Run it as the adb shell user. The pad lives for one hour, or until CTRL+C.
 
-# 1. Hide original controller from games via permissions (or EVIOCGRAB in app)
-chmod 000 ${devPath}
-
-# 2. Start virtual uinput device
 echo "Starting uinput daemon..."
 /system/bin/uinput - << 'EOF'
 ${regJson}
 {"id":1,"command":"delay","duration":500}
 ${centerJson}
+{"id":1,"command":"delay","duration":3600000}
 EOF
-
-# When stopped, restore permissions:
-# chmod 660 ${devPath}
 `;
 
 
@@ -110,14 +107,14 @@ EOF
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('eviocgrab')}
+            onClick={() => setActiveTab('anchor')}
             className={`px-4 py-2.5 border-b-2 font-medium transition ${
-              activeTab === 'eviocgrab'
+              activeTab === 'anchor'
                 ? 'border-emerald-500 text-emerald-400 bg-stone-900/60'
                 : 'border-transparent text-stone-400 hover:text-stone-200'
             }`}
           >
-            Hide Controller (EVIOCGRAB)
+            Anchor mode
           </button>
           <button
             type="button"
@@ -133,32 +130,23 @@ EOF
         </div>
 
         <div className="p-4 overflow-y-auto space-y-4 text-sm text-stone-300">
-          {activeTab === 'eviocgrab' && (
+          {activeTab === 'anchor' && (
             <div className="space-y-3">
               <div className="p-3 bg-emerald-950/40 border border-emerald-800/50 rounded-xl space-y-2">
                 <div className="font-semibold text-emerald-300 text-xs">
-                  How Hiding the Physical Controller Works on Linux/Android:
+                  Forwarding vs. anchor mode
                 </div>
                 <p className="text-xs text-stone-300 leading-relaxed">
-                  When you play a controller-supported game, Android's <code className="bg-stone-900 px-1 py-0.5 rounded text-emerald-300">EventHub</code> reads events from every input node under <code className="bg-stone-900 px-1 py-0.5 rounded text-stone-200">/dev/input/event*</code>. If Gamepad Bridge forwards events to a virtual Xbox One / DualShock 4 pad, games may receive inputs from <em>both</em> controllers simultaneously (causing duplicate jumps, double weapon switches, or spinning cameras).
+                  Some games only need an official Xbox One or DualShock 4 device to exist before they switch on controller support. In <strong>anchor mode</strong> (&quot;Forward controller inputs&quot; unchecked) Gamepad Bridge only creates the virtual pad and the game reads your real controller directly, so there is no added delay.
                 </p>
               </div>
 
               <div className="bg-stone-950 p-3.5 rounded-xl border border-stone-800 space-y-2">
                 <div className="text-xs font-semibold text-stone-200">
-                  Method 1: Kernel Exclusive Grab (<code className="text-emerald-400">EVIOCGRAB</code> ioctl)
+                  When forwarding is on
                 </div>
                 <p className="text-xs text-stone-400 leading-relaxed">
-                  Linux provides the <code className="text-stone-200">EVIOCGRAB</code> ioctl (hex code <code className="text-amber-400">0x40044590</code>). When the bridge process opens <code className="text-stone-200">{devPath}</code> and calls <code className="text-stone-200">ioctl(fd, 0x40044590, 1)</code>, the kernel exclusively passes all events only to the bridge. Android's EventHub is completely detached from the original pad, so games cannot see it!
-                </p>
-              </div>
-
-              <div className="bg-stone-950 p-3.5 rounded-xl border border-stone-800 space-y-2">
-                <div className="text-xs font-semibold text-stone-200">
-                  Method 2: Virtual &quot;Anchor&quot; Mode (Zero Double-Input & Zero Latency)
-                </div>
-                <p className="text-xs text-stone-400 leading-relaxed">
-                  Games like <em>Call of Duty Mobile</em> or <em>Genshin Impact</em> only require an official Xbox One or DS4 device to be present in order to unlock gamepad mode. By unchecking &quot;Forward inputs&quot;, Gamepad Bridge creates the virtual pad as an anchor, and the game reads your physical controller directly. Since no inputs are forwarded, there is <strong>zero duplicate input</strong>!
+                  Your controller&apos;s buttons and sticks are translated and sent to the virtual pad. In the author&apos;s testing with COD Mobile and Alto&apos;s Odyssey this did not cause double inputs, even though the real controller is not hidden from the game. Hiding it (the EVIOCGRAB ioctl) is not implemented, because it needs native code.
                 </p>
               </div>
             </div>
